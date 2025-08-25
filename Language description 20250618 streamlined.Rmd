@@ -1,0 +1,2894 @@
+---
+title: "Language description 20250523 streamlined"
+author: "Qingxin Xu"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup}
+library(tidyverse)
+library(tidyr)
+library(ggpubr)
+library(ggplot2)
+library(ggrepel)
+
+```
+
+```{r import data}
+#load csv files
+d <- list.files(pattern = "\\.csv$") %>%
+  map_df(~ read.csv(.x, stringsAsFactors = FALSE) %>%
+         rename(Language = Language.s.) %>%
+         mutate(filename = .x))
+
+```
+
+```{r wrangle, include=TRUE}
+df = d%>%
+  mutate_if(is.factor, as.character)%>%
+  rename_with(~ "System", .cols = contains("Focus", ignore.case = TRUE)) %>%
+  rename_with(~ "Author", .cols = contains("Author", ignore.case = TRUE))%>%
+  mutate(Orientation = str_replace(Orientation, "contrastive", "comparative"))%>%
+  mutate(Language = ifelse(Language == "na", "various", Language))%>%
+  mutate(Language.family = str_replace(Language.family, "na", "various"))%>%
+  mutate(System = str_replace(System, "ASSSESSMENT", "ASSESSMENT"))%>%
+  mutate(System = str_replace(System, "person", "PERSON"))%>%
+  mutate(Language = str_replace(Language, "sign language", "Sign Language"))%>%
+  mutate(Language.family = str_replace(Language.family, "Sign language", "Sign Language"))%>%
+  mutate(counter = 1)%>%
+  mutate(dataTotal = n())
+```
+  
+```{r dataframe expanded, include=TRUE}
+df_expanded = df%>%
+  separate_rows(System, sep = ",\\s*") %>%
+  mutate(
+    System.New = case_when(
+      # TRANSITIVITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "transitivity|range|process type|circumstantiation|circumstance of time") ~ "TRANSITIVITY",
+      
+      # ASSESSMENT group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "negotiation|assessment") ~ "ASSESSMENT",
+      
+      # MODALITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "modulation|modality|modal verbs") ~ "MODALITY",
+      
+      # FINITENESS group (case-insensitive)
+      str_detect(str_to_lower(System), "finite") ~ "FINITENESS",
+      
+      # Keep original value if none of the above match
+      TRUE ~ System
+    ),
+    # Convert to factor for better plotting/analysis
+    System.New = as.factor(System.New)
+  )%>%
+  mutate(System.New = trimws(System.New)) %>%
+  
+  separate_rows(Language, sep = ",\\s*")%>%
+  mutate(Language = trimws(Language))%>%
+  
+  separate_rows(Author, sep = ";\\s*")%>%
+  mutate(Author = trimws(Author))%>%
+  
+  separate_rows(Language.family, sep = ",\\s*")%>%
+  mutate(Language.family = trimws(Language.family))%>%
+  
+  separate_rows(Branch, sep = ",\\s*")%>%
+  mutate(Branch = trimws(Branch))
+
+```
+
+
+```{r language counts in the whole dataset}
+language_total <- df_expanded%>%
+  distinct(Title, .keep_all = TRUE) %>% 
+  count(Language, name = "Count") %>%
+  arrange(desc(Count))
+```
+
+```{r language family counts in the whole dataset}
+language_family_total <- df_expanded%>%
+  distinct(Title, .keep_all = TRUE) %>% 
+  count(Language.family, name = "Count") %>%
+  arrange(desc(Count))
+```
+
+```{r language branch counts in the whole dataset}
+language_branch_total <- df_expanded%>%
+  distinct(Title, .keep_all = TRUE) %>% 
+  count(Branch, name = "Count") %>%
+  arrange(desc(Count))
+```
+
+```{r system counts in the whole dataset}
+system_total <- df_expanded%>%
+  distinct(Title, .keep_all = TRUE) %>%
+  filter(System.New !="na")%>%
+  count(System.New, name = "Count") %>%
+  arrange(desc(Count))
+```
+
+```{r metafunction counts in the whole dataset}
+metafunction_total <- df_expanded%>%
+  distinct(Title, .keep_all = TRUE) %>%
+  count(Metafunction, name = "Count") %>%
+  arrange(desc(Count))
+```
+
+```{r rank counts in the whole dataset}
+rank_total <- df_expanded%>%
+  distinct(Title, .keep_all = TRUE) %>%
+  count(Rank, name = "Count") %>%
+  arrange(desc(Count))
+```
+
+```{r author counts in the whole dataset}
+author_total <- df_expanded%>%
+  distinct(Title, .keep_all = TRUE) %>%
+  count(Author, name = "Count") %>%
+  arrange(desc(Count))
+```
+
+```{r FIG9 orientation by year}
+
+# Prepare orientation-over-time data
+orientation_time <- df %>%
+  mutate(
+    Year = as.numeric(Year),
+    Orientation = str_to_lower(Orientation) %>% 
+      str_trim() %>% 
+      ifelse(is.na(.), "unknown", .)
+  ) %>%
+  count(Year, Orientation, name = "Count") %>%
+  complete(
+    Year = full_seq(Year, 1), 
+    Orientation, 
+    fill = list(Count = 0)
+  )
+
+#png("Fig.9 Orientation Trends in Publications Over Time.png", units="in", width=10, height=5, res=200)
+ggplot(orientation_time, aes(x = Year, y = Count, color = Orientation)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.5) +
+  geom_text(aes(label = ifelse(Count > 0, Count, "")), 
+            vjust = -0.8, size = 3, check_overlap = TRUE) +
+  labs(title = "Orientation Trends in Publications Over Time",
+       subtitle = "Number of publications per orientation category by year",
+       x = "Year", y = "Number of Publications") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(hjust = 1),
+    legend.position = "right",
+    strip.text = element_text(face = "bold", size = 10)
+  ) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6)) +
+  scale_color_brewer(palette = "Set1")
+```
+
+```{r FIG10-1 no.of language, language family, orientation and year}
+library(stringr)
+library(scales)
+
+# Step 1: Data Preparation
+analysis_data <- df %>%
+  # Select relevant columns
+  select(Year, Orientation, No..of.lgs, Language.family) %>%
+  # Convert number of languages to numeric
+  mutate(No..of.lgs = as.numeric(No..of.lgs))
+
+# Step 2: Calculate language counts by Year and Orientation
+language_counts <- analysis_data %>%
+  group_by(Year, Orientation) %>%
+  summarise(Total_Languages = sum(No..of.lgs, na.rm = TRUE),
+            .groups = "drop")
+
+# Step 3: Calculate language family counts (handling multiple families per row)
+family_counts <- analysis_data %>%
+  # Separate multiple families into rows
+  separate_rows(Language.family, sep = ",\\s*") %>%
+  # Count each family occurrence
+  group_by(Year, Orientation, Language.family) %>%
+  summarise(Family_Count = n(), .groups = "drop") %>%
+  # Calculate total unique families per year-orientation
+  group_by(Year, Orientation) %>%
+  summarise(Total_Families = n_distinct(Language.family),
+            .groups = "drop")
+
+# Step 4: Combine results
+combined_results <- language_counts %>%
+  left_join(family_counts, by = c("Year", "Orientation")) %>%
+  pivot_longer(cols = c(Total_Languages, Total_Families),
+               names_to = "Metric",
+               values_to = "Count")
+
+# Step 5: Visualization
+#png("Fig.10-1 Language and Language Family Research Trends.png", units="in", width=10, height=5, res=200)
+ggplot(combined_results, aes(x = Year, y = Count, color = Orientation)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~Metric, scales = "free_y", 
+             labeller = labeller(Metric = c(
+               "Total_Languages" = "Total Languages Studied",
+               "Total_Families" = "Unique Language Families"
+             ))) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6)) +
+  scale_y_continuous(breaks = pretty_breaks()) +
+  scale_color_manual(values = c("comparative" = "#E69F00",
+                               "descriptive" = "#56B4E9",
+                               "typological" = "#009E73")) +
+  labs(title = "Language and Language Family Research Trends (2004-2024)",
+       subtitle = "Comparison by Research Orientation",
+       x = "Year",
+       y = "Count",
+       color = "Research Orientation") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(face = "bold", size = 10))
+```
+
+```{r FIG10-2 visualize both top languages and language families by orientation}
+library(patchwork) # For plot composition
+
+# Step 1: Prepare and clean the data
+language_analysis_data <- df %>%
+  # Select relevant columns
+  select(Year, Orientation, Language, Language.family)
+
+# Step 2: Process languages (split multiple entries)
+language_counts <- language_analysis_data %>%
+  # Split multiple languages into rows
+  separate_rows(Language, sep = ",\\s*") %>%
+  # Count language occurrences by orientation
+  count(Orientation, Language, name = "Count") %>%
+  group_by(Orientation) %>%
+  # Rank languages within each orientation
+  mutate(Rank = rank(-Count, ties.method = "first")) %>%
+  ungroup() %>%
+  # Keep top 10 languages per orientation
+  filter(Rank <= 10) %>%
+  # Clean language names
+  mutate(Language = str_trim(Language))
+
+# Prepare language data (from previous steps)
+language_plot_data <- language_counts %>%
+  mutate(Type = "Language") %>%
+  rename(Term = Language)
+
+# Step 3: Process language families (split multiple entries)
+family_counts <- language_analysis_data %>%
+  # Split multiple families into rows
+  separate_rows(Language.family, sep = ",\\s*") %>%
+  # Count family occurrences by orientation
+  count(Orientation, Language.family, name = "Count") %>%
+  group_by(Orientation) %>%
+  # Rank families within each orientation
+  mutate(Rank = rank(-Count, ties.method = "first")) %>%
+  ungroup() %>%
+  # Keep top 10 families per orientation
+  filter(Rank <= 10) %>%
+  # Clean family names
+  mutate(Language.family = str_trim(Language.family))
+
+# Prepare family data (from previous steps)
+family_plot_data <- family_counts %>%
+  mutate(Type = "Language Family") %>%
+  rename(Term = Language.family)
+
+# Combine data
+combined_data <- bind_rows(language_plot_data, family_plot_data) %>%
+  mutate(Term = fct_reorder(Term, Count))
+
+# Create unified plot
+unified_plot <- ggplot(combined_data, 
+       aes(x = Count, y = Term, fill = Orientation)) +
+  geom_col(width = 0.7) +
+  facet_grid(Type ~ Orientation, 
+             scales = "free_y", 
+             space = "free_y",
+             switch = "y") +
+  scale_fill_manual(values = c("comparative" = "#E69F00",
+                              "descriptive" = "#56B4E9",
+                              "typological" = "#009E73")) +
+  labs(title = "Top 10 Most Studied Languages and Language Families by Research Orientation",
+       x = "Number of Studies",
+       y = NULL,
+       fill = "Orientation") +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.placement = "outside",
+    strip.text.y = element_text(face = "bold", size = 11),
+    strip.text.x = element_text(face = "bold", size = 11),
+    axis.text.y = element_text(size = 9),
+    panel.spacing = unit(1, "lines"),
+    plot.title = element_text(size = 14, hjust = 0.5)
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.05)))
+
+# Add count labels
+unified_plot <- unified_plot + 
+  geom_text(aes(label = Count), 
+            hjust = -0.2, 
+            size = 3,
+            color = "black")
+
+# Adjust plot dimensions to prevent crowding
+unified_plot <- unified_plot & 
+  coord_cartesian(clip = "off") # Allows labels to extend beyond plot area
+
+# Display plot
+#png("Fig.10-2 Top 10 Most Studied languages and language families by orientation.png", units="in", width=10, height=5, res=200)
+unified_plot
+```
+
+
+
+```{r FIG11-2 language families year and vitality status}
+
+# Step 1: Prepare the data
+vitality_data <- df %>%
+  # Select relevant columns
+  select(Year, Language.family, Vitality) %>%
+  # Separate multiple language families
+  separate_rows(Language.family, sep = ",\\s*") %>%
+  # Clean family names
+  mutate(Language.family = str_trim(Language.family)) %>%
+  filter(!is.na(Language.family) & Language.family != "")%>%
+  # Separate multiple vitalities
+  separate_rows(Vitality, sep = ",\\s*") %>%
+  mutate(Vitality = str_trim(Vitality))%>%
+  filter(!is.na(Vitality) & Vitality != "")
+
+
+# Step 2: Count occurrences by year, family, and vitality
+vitality_counts <- vitality_data %>%
+  count(Year, Language.family, Vitality, name = "Count")
+
+# Step 3: Identify top language families for plotting
+top_families <- vitality_counts %>%
+  group_by(Language.family) %>%
+  summarise(Total = sum(Count)) %>%
+  slice_max(Total, n = 10) %>%  # Adjust this number as needed
+  pull(Language.family)
+
+# Plot 1: Line plot of vitality trends for top families
+#png("Fig.11-2 Vitality trends for top families.png", units="in", width=10, height=5, res=200)
+ggplot(vitality_counts %>% 
+         filter(Language.family %in% top_families),
+       aes(x = Year, y = Count, color = Vitality)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~Language.family, scales = "free_y") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6)) +
+  scale_color_manual(values = c(
+    "institutional" = "#1b9e77",
+    "stable" = "#d95f02", 
+    "endangered" = "#7570b3",
+    "other" = "#e7298a"
+  )) +
+  labs(title = "Language Vitality Trends by Family (2004-2024)",
+       subtitle = "Showing top 8 most studied language families",
+       x = "Year",
+       y = "Number of Studies",
+       color = "Vitality Status") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        panel.grid.minor = element_blank())
+```
+
+```{r FIG11-1 overall vitality trends}
+# Plot 2: Stacked area chart for overall vitality trends
+#png("Fig.11-1 Overall vitality trends.png", units="in", width=10, height=5, res=200)
+vitality_counts %>%
+  group_by(Year, Vitality) %>%
+  summarise(Total = sum(Count), .groups = "drop") %>%
+  ggplot(aes(x = Year, y = Total, color = Vitality)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.5) +
+  geom_text(aes(label = ifelse(Total > 0, Total, "")), 
+            vjust = -0.8, size = 3, check_overlap = TRUE) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6)) +
+  labs(title = "Overall Language Vitality Research Trends (2004-2024)",
+       x = "Year",
+       y = "Number of Studies",
+       fill = "Vitality Status") +
+  theme_minimal()+
+  scale_color_brewer(palette = "Set1")
+```
+
+```{r system language dataframe}
+library(stringr)
+
+# Step 1: Separate rows with multiple systems
+df_system_language <- df %>%
+  filter(System != "na")%>%
+  separate_rows(System, sep = ",\\s*") %>%
+  mutate(
+    System.New = case_when(
+      # TRANSITIVITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "transitivity|range|process type|circumstantiation|circumstance of time") ~ "TRANSITIVITY",
+      
+      # ASSESSMENT group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "negotiation|assessment") ~ "ASSESSMENT",
+      
+      # MODALITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "modulation|modality|modal verbs") ~ "MODALITY",
+      
+      # FINITENESS group (case-insensitive)
+      str_detect(str_to_lower(System), "finite") ~ "FINITENESS",
+      
+      # Keep original value if none of the above match
+      TRUE ~ System
+    ),
+    # Convert to factor for better plotting/analysis
+    System.New = as.factor(System.New)
+  )%>%
+  mutate(System.New = trimws(System.New)) %>%
+  separate_rows(Language, sep = ",\\s*")%>%
+  mutate(Language = trimws(Language))
+
+
+```
+
+
+```{r FIG12-1 descriptive language and System.New over year line graph}
+library(stringr)
+library(scales)
+
+# Step 1: Process Language column (split and count)
+descriptive_language_counts <- df_system_language %>%
+  filter(Orientation == "descriptive")%>%
+  # Count language occurrences
+  count(Language, name = "Count") %>%
+  arrange(desc(Count))
+
+# Get top languages
+top_descriptive_languages <- descriptive_language_counts %>%
+  filter (Count >2) %>%
+  pull(Language)
+
+# Step 2: Process System.New column (split and count)
+descriptive_system_counts <- df_system_language %>%
+  filter(Orientation == "descriptive")%>%
+  # Count language occurrences
+  count(System.New, name = "Count") %>%
+  arrange(desc(Count))
+
+# Get top systems
+top_descriptive_systems <- descriptive_system_counts %>%
+  filter (Count >1)%>%
+  pull(System.New)
+
+# Step 3: Prepare data for visualization
+plot_data <- df_system_language %>%
+  # Filter for top languages
+  filter(Language %in% top_descriptive_languages) %>%
+   # Filter for top systems
+  filter(System.New %in% top_descriptive_systems) %>%
+  # Count combinations
+  count(System.New, Year, Language) %>%
+  # Complete missing year-System.New combinations (for continuity)
+  complete(System.New, Year, Language, fill = list(n = 0)) %>%
+  # Filter years with data (remove empty early/late years)
+  group_by(System.New, Year) %>%
+  filter(n > 0) %>%
+  ungroup()
+
+# Line Plot for Temporal Trends
+#png("Fig.12-1 System Trends in Popular Languages in Descriptive Studies.png", units="in", width=10, height=5, res=200)
+ggplot(plot_data,
+       aes(x = Year, y = n, color = System.New)) +
+  geom_line() +
+  geom_point(size = 1) +
+  facet_wrap(~Language, ncol = 4) +
+  scale_x_continuous(breaks = pretty_breaks(n = 4)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 2)) +
+  labs(title = "System (n>1) Trends in Popular Languages (n>2) in Descriptive Studies",
+       x = "Year",
+       y = "Number of Studies",
+       color = "System") +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        strip.text = element_text(size = 8))
+```
+
+```{r FIG12-2 descriptive language and System.New over year line graph2}
+# Line Plot for Temporal Trends
+#png("Fig.12-2 System Trends in Popular Languages in Descriptive Studies.png", units="in", width=10, height=5, res=200)
+ggplot(plot_data %>% filter(n > 0),
+       aes(x = Year, y = n, color = Language)) +
+  geom_line() +
+  geom_point(size = 1) +
+  facet_wrap(~System.New, ncol = 5) +
+  scale_x_continuous(breaks = pretty_breaks(n = 4)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 2)) +
+  labs(title = "Popular Systems (N>1) in Most Frequent Languages (n>2) in Descriptive Studies",
+       x = "Year",
+       y = "Number of Studies",
+       color = "System") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        strip.text = element_text(size = 8))
+
+```
+
+```{r FIG12-3 system-language combinations}
+# Additional: Top System-Language Combinations
+top_combos <- plot_data %>%
+  group_by(System.New, Language) %>%
+  summarise(Total = sum(n), .groups = "drop") %>%
+  arrange(desc(Total)) %>%
+  slice_head(n = 20)
+
+#png("Fig.12-3 Top 20 System-Language Combination in Descriptive Studies.png", units="in", width=10, height=5, res=200)
+ggplot(top_combos, aes(x = Total, y = reorder(Language, Total), fill = System.New)) +
+  geom_col() +
+  geom_text(aes(label = Total), position = position_stack(vjust = 0.5), size = 3) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(title = "Top 20 System-Language Combinations",
+       x = "Total Studies",
+       y = "Language",
+       fill = "System") +
+  theme_minimal()
+```
+
+
+```{r FIG12-3_new system-language combinations}
+library(stringr)
+library(scales)
+
+#Prepare data for visualization
+top_combos <- df_system_language %>%
+  # Count combinations
+  count(System.New, Language) %>%
+ 
+  group_by(System.New, Language) %>%
+  summarise(Total = sum(n), .groups = "drop") %>%
+  arrange(desc(Total)) %>%
+  slice_head(n = 20)
+
+#png("Fig.12-3_new Top 20 System-Language Combination in Descriptive Studies.png", units="in", width=10, height=5, res=200)
+ggplot(top_combos, aes(x = Total, y = reorder(Language, Total), fill = System.New)) +
+  geom_col() +
+  geom_text(aes(label = Total), position = position_stack(vjust = 0.5), size = 3) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(title = "Top 20 System-Language Combinations",
+       x = "Total Studies",
+       y = "Language",
+       fill = "System") +
+  theme_minimal()
+```
+
+
+```{r descriptive system language dataframe}
+library(stringr)
+
+# Step 1: Separate rows with multiple systems
+df_descriptive_system_language <- df %>%
+  filter(System != "na")%>%
+  filter(Orientation == "descriptive")%>%
+  separate_rows(System, sep = ",\\s*") %>%
+  mutate(
+    System.New = case_when(
+      # TRANSITIVITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "transitivity|range|process type|circumstantiation|circumstance of time") ~ "TRANSITIVITY",
+      
+      # ASSESSMENT group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "negotiation|assessment") ~ "ASSESSMENT",
+      
+      # MODALITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "modulation|modality|modal verbs") ~ "MODALITY",
+      
+      # FINITENESS group (case-insensitive)
+      str_detect(str_to_lower(System), "finite") ~ "FINITENESS",
+      
+      # Keep original value if none of the above match
+      TRUE ~ System
+    ),
+    # Convert to factor for better plotting/analysis
+    System.New = as.factor(System.New)
+  )%>%
+  mutate(System.New = trimws(System.New)) %>%
+  separate_rows(Language, sep = ",\\s*")%>%
+  mutate(Language = trimws(Language))
+
+
+```
+
+```{r FIG12-3_new descriptive system-language combinations}
+
+#Prepare data for visualization
+top_combos <- df_descriptive_system_language %>%
+  # Count combinations
+  count(System.New, Language) %>%
+ 
+  group_by(System.New, Language) %>%
+  summarise(Total = sum(n), .groups = "drop") %>%
+  arrange(desc(Total)) 
+
+#png("Fig.12-3_new System-Language Combination in Descriptive Studies.png", units="in", width=10, height=5, res=200)
+ggplot(top_combos, aes(x = Total, y = reorder(Language, Total), fill = System.New)) +
+  geom_col() +
+  geom_text(aes(label = Total), position = position_stack(vjust = 0.5), size = 3) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(title = "System-Language Combinations in Descriptive Studies",
+       x = "Total Studies",
+       y = "Language",
+       fill = "System") +
+  theme_minimal()
+```
+
+
+```{r FIG13-1 comparative and typological System.New over year}
+
+non_descriptive_system <- df %>%
+  filter(Orientation != "descriptive")%>%
+  filter(System != "na")%>%
+  separate_rows(System, sep = ",\\s*") %>%
+  mutate(
+    System.New = case_when(
+      # TRANSITIVITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "transitivity|range|process type|circumstantiation|circumstance of time") ~ "TRANSITIVITY",
+      
+      # ASSESSMENT group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "negotiation|assessment") ~ "ASSESSMENT",
+      
+      # MODALITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "modulation|modality|modal verbs") ~ "MODALITY",
+      
+      # FINITENESS group (case-insensitive)
+      str_detect(str_to_lower(System), "finite") ~ "FINITENESS",
+      
+      # Keep original value if none of the above match
+      TRUE ~ System
+    ),
+    # Convert to factor for better plotting/analysis
+    System.New = as.factor(System.New)
+  )%>%
+  mutate(System.New = trimws(System.New)) 
+
+#png("Fig.13-1 System Distribution Trend in comparative and typological studies.png", units="in", width=10, height=6, res=200)
+ggplot(non_descriptive_system, aes(x = Year, fill = Orientation)) +
+  geom_bar() +
+  labs(title = "System Distribution Trend in Comparative/Typological Studies",
+       x = "Year",
+       y = "Number of Publications",
+       fill = "Orientation") +
+  facet_wrap(~System.New, ncol = 5, labeller = label_wrap_gen(20))+
+  scale_x_continuous(breaks = pretty_breaks(n = 4)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 2)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom",)  # Rotate x-labels if needed
+
+```
+
+```{r FIG13-2 comparative and typological System.New counts}
+system_diff <- df %>%
+  filter(Orientation != "descriptive")%>%
+  filter(System != "na")%>%
+  separate_rows(System, sep = ",\\s*") %>%
+  mutate(
+    System.New = case_when(
+      # TRANSITIVITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "transitivity|range|process type|circumstantiation|circumstance of time") ~ "TRANSITIVITY",
+      
+      # ASSESSMENT group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "negotiation|assessment") ~ "ASSESSMENT",
+      
+      # MODALITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "modulation|modality|modal verbs") ~ "MODALITY",
+      
+      # FINITENESS group (case-insensitive)
+      str_detect(str_to_lower(System), "finite") ~ "FINITENESS",
+      
+      # Keep original value if none of the above match
+      TRUE ~ System
+    ),
+    # Convert to factor for better plotting/analysis
+    System.New = as.factor(System.New)
+  )
+
+if(nrow(system_diff) == 0) {
+  message("No comparative/typological studies found. Check your Orientation values.")
+} else {
+  # Generate plot
+  p <- system_diff %>%
+    ggplot(aes(x = System.New, fill = System.New)) +
+    geom_bar() +
+    facet_wrap(~ Orientation, ncol = 1) +  # Vertical arrangement for readability
+    labs(title = "System Distribution: Comparative vs. Typological Studies",
+         subtitle = paste("Total studies:", nrow(system_diff)),
+         x = NULL,  # Remove x-axis title (redundant with labels)
+         y = "Number of Studies") +
+    scale_x_discrete(labels = function(x) stringr::str_wrap(x, width = 10)) +  # Wrap long labels
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+      legend.position = "none",
+      strip.text = element_text(face = "bold", size = 12),
+      panel.spacing = unit(1, "lines")  # Add space between facets
+    )
+  
+  # Force print (essential in loops/RMarkdown)
+  print(p)
+}
+
+#png("Fig.13-2 Systems Distribution in comparative and typological studies.png", units="in", width=10, height=5, res=200)
+
+```
+
+
+
+```{r FIG13-3 System Distribution in Comparative vs Typological Studies}
+system_diff <- df %>%
+  filter(Orientation != "descriptive")%>%
+  filter(System != "na")%>%
+  separate_rows(System, sep = ",\\s*") %>%
+  mutate(
+    System.New = case_when(
+      # TRANSITIVITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "transitivity|range|process type|circumstantiation|circumstance of time") ~ "TRANSITIVITY",
+      
+      # ASSESSMENT group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "negotiation|assessment") ~ "ASSESSMENT",
+      
+      # MODALITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "modulation|modality|modal verbs") ~ "MODALITY",
+      
+      # FINITENESS group (case-insensitive)
+      str_detect(str_to_lower(System), "finite") ~ "FINITENESS",
+      
+      # Keep original value if none of the above match
+      TRUE ~ System
+    ),
+    # Convert to factor for better plotting/analysis
+    System.New = as.factor(System.New)
+  )%>%
+  count(System.New, Orientation, name = "Count") %>%
+  pivot_wider(
+    names_from = Orientation,
+    values_from = Count,
+    values_fill = 0  # Fill missing combinations with 0
+  ) %>%
+  # Order systems by total publications
+  mutate(System.New = fct_reorder(System.New, comparative + typological))
+
+# Create plot with proper scaling
+#png("Fig.13-3 System Distribution in Comparative vs Typological Studies.png", units="in", width=10, height=6, res=200)
+ggplot(system_diff, aes(y = System.New)) +
+  # Left bars (comparative)
+  geom_segment(
+    aes(x = 0, xend = -comparative, yend = System.New),
+    color = "#1f78b4",
+    linewidth = 6,
+    lineend = "round"
+  ) +
+  # Right bars (typological)
+  geom_segment(
+    aes(x = 0, xend = typological, yend = System.New),
+    color = "#33a02c",
+    linewidth = 6,
+    lineend = "round"
+  ) +
+  # Center line
+  geom_vline(xintercept = 0, linewidth = 0.3) +
+  # Value labels
+  geom_text(
+    aes(x = -comparative, label = comparative),
+    hjust = 1.1,
+    size = 3,
+    color = "white"
+  ) +
+  geom_text(
+    aes(x = typological, label = typological),
+    hjust = -0.1,
+    size = 3,
+    color = "white"
+  ) +
+  # Axis formatting
+  scale_x_continuous(
+    breaks = c(-max(system_diff$comparative), 0, max(system_diff$typological)),
+    labels = function(x) abs(x),
+    expand = expansion(mult = c(0.1, 0.1))
+  ) +
+  # Labels
+  labs(
+    title = "System Distribution in Comparative vs Typological Studies",
+    x = "Number of Publications",
+    y = NULL
+  ) +
+  # Orientation labels
+  annotate(
+    "text",
+    x = -max(system_diff$comparative)/2,
+    y = length(unique(system_diff$System.New)) + 0.4,
+    label = "COMPARATIVE",
+    color = "#1f78b4",
+    fontface = "bold"
+  ) +
+  annotate(
+    "text",
+    x = max(system_diff$typological)/2,
+    y = length(unique(system_diff$System.New)) + 0.4,
+    label = "TYPOLOGICAL",
+    color = "#33a02c",
+    fontface = "bold"
+  ) +
+  # Theme
+  theme_minimal() +
+  theme(
+    panel.grid.major.y = element_blank(),
+    plot.title = element_text(hjust = 0.5, face = "bold", margin = margin(b = 16)),
+    axis.text.y = element_text(size = 10),
+    plot.margin = margin(1, 1, 1, 1, "cm")
+  )
+
+
+```
+
+
+```{r FIG14 System Distribution by Language First Appearance Year}
+
+# Rename System column and process data
+result <- df %>%
+  # 1. Filter descriptive orientation 
+  filter(Orientation == "descriptive") %>%
+  
+  # 2.Converge systems
+  filter(System != "na")%>%
+  separate_rows(System, sep = ",\\s*") %>%
+  mutate(
+    System.New = case_when(
+      # TRANSITIVITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "transitivity|range|process type|circumstantiation|circumstance of time") ~ "TRANSITIVITY",
+      
+      # ASSESSMENT group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "negotiation|assessment") ~ "ASSESSMENT",
+      
+      # MODALITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "modulation|modality|modal verbs") ~ "MODALITY",
+      
+      # FINITENESS group (case-insensitive)
+      str_detect(str_to_lower(System), "finite") ~ "FINITENESS",
+      
+      # Keep original value if none of the above match
+      TRUE ~ System
+    ),
+    # Convert to factor for better plotting/analysis
+    System.New = as.factor(System.New)
+  )%>%
+  
+  # 2. Process languages and years
+  separate_rows(`Language`, sep = ",\\s*") %>%
+  mutate(
+    Language_new = trimws(`Language`),
+    Year = as.numeric(Year)
+  ) %>%
+  filter(Language_new != "") %>%
+  # 3. Find first occurrence year for each language
+  group_by(Language_new) %>%
+  mutate(first_year = min(Year, na.rm = TRUE)) %>%
+  ungroup() %>%
+  # 4. Filter to first occurrence rows
+  filter(Year == first_year)
+
+# Create summary table
+System_summary_table <- result %>%
+  group_by(Language_new, first_year, System.New) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  arrange(first_year, desc(Count))
+
+# Print summary table
+print(System_summary_table)
+
+```
+
+
+```{r FIG14 System Distribution by Language First Appearance Year_heat map}
+
+#png("FIG14 System Distribution by Language First Appearance Year_heat map.png", units="in", width=10, height=5, res=100)
+ggplot(System_summary_table, aes(x = first_year, y = System.New)) +
+  geom_tile(aes(fill = Count), color = "orange") +
+  scale_fill_gradient(low = "orange", high = "steelblue") +
+  scale_x_continuous(breaks = seq(min(result$first_year), max(result$first_year), by = 2)) +
+  labs(title = "System Frequency Heatmap by First Appearance Year in Descriptive Studies",
+       x = "First Occurrence Year",
+       y = "System") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+```{r FIG14-4 System Distribution by Language First Appearance Year_heat map}
+
+#png("Fig.14-4 System Distribution by Language First Appearance Year_heat map.png", units="in", width=10, height=5, res=200)
+library(dplyr)
+library(ggplot2)
+
+# 1. Determine chronological order of systems
+system_order <- System_summary_table %>%
+  group_by(System.New) %>%
+  summarise(first_appearance_year = min(first_year)) %>%
+  arrange(first_appearance_year) %>%
+  pull(System.New)
+
+# 2. Reorder factor levels in the data
+System_summary_table <- System_summary_table %>%
+  mutate(System.New = factor(System.New, levels = rev(system_order))) # rev() puts earliest at top
+
+# 3. Plot with chronological y-axis
+ggplot(System_summary_table, aes(x = first_year, y = System.New)) +
+  geom_tile(aes(fill = Count), color = "white", linewidth = 0.3) +
+  geom_text(aes(label = Count), color = "white", size = 3) + # Add count labels
+  scale_fill_gradient(
+    low = "orange", 
+    high = "steelblue",
+    breaks = pretty_breaks(),
+    name = "Number of\nLanguages"
+  ) +
+  scale_x_continuous(
+    breaks = seq(min(System_summary_table$first_year), 
+                max(System_summary_table$first_year), 
+                by = 2),
+    expand = c(0, 0)
+  ) +
+  labs(
+    title = "System Usage by First Appearance Year",
+    subtitle = "Y-axis ordered chronologically (earliest systems at top)",
+    x = "First Occurrence Year", 
+    y = "System"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+```
+
+
+
+
+```{r TABLE14-1 First occurrence of each system in descriptive studies}
+# Find first occurrence of each system and the languages studied
+system_first_use <- df %>%
+  # Filter descriptive studies and valid systems
+  filter(Orientation == "descriptive", 
+         System != "na") %>%
+  
+  # Process systems (same as before)
+  separate_rows(System, sep = ",\\s*") %>%
+  mutate(
+    System.New = case_when(
+      str_detect(str_to_lower(System), 
+                "transitivity|range|process type|circumstantiation|circumstance of time") ~ "TRANSITIVITY",
+      str_detect(str_to_lower(System), 
+                "negotiation|assessment") ~ "ASSESSMENT",
+      str_detect(str_to_lower(System), 
+                "modulation|modality|modal verbs") ~ "MODALITY",
+      str_detect(str_to_lower(System), "finite") ~ "FINITENESS",
+      TRUE ~ System
+    ),
+    System.New = as.factor(System.New)
+  ) %>%
+  
+  # Process languages
+  separate_rows(Language, sep = ",\\s*") %>%
+  mutate(
+    Language = trimws(Language),
+    Year = as.numeric(Year)
+  ) %>%
+  filter(Language != "") %>%
+  
+  # Find first occurrence year for each SYSTEM
+  group_by(System.New) %>%
+  mutate(system_first_year = min(Year, na.rm = TRUE)) %>%
+  ungroup() %>%
+  
+  # Filter to first occurrence rows of each system
+  filter(Year == system_first_year) %>%
+  
+  # Create summary table
+  group_by(System.New, system_first_year, Language) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  arrange(system_first_year, System.New, desc(Count))
+
+# View results
+print(system_first_use)
+```
+
+
+
+```{r FIG14-1 System Distribution Timeline of First Descriptions}
+
+#png("Fig.14-1 System Distribution Timeline of First Descriptions.png", units="in", width=10, height=10, res=200)
+
+library(ggrepel)
+
+# Step 1: Determine the historical order of systems
+system_order <- system_first_use %>%
+  group_by(System.New) %>%
+  summarise(first_system_year = min(system_first_year, na.rm = TRUE)) %>%
+  arrange(first_system_year) %>%
+  pull(System.New)
+
+# Step 2: Apply ordering to both datasets
+result <- result %>%
+  mutate(System.New = factor(System.New, levels = rev(system_order)))
+system_first_use <- system_first_use %>%
+  mutate(System.New = factor(System.New, levels = rev(system_order)))
+
+# Step 3: Combine data for plotting
+combined_data <- bind_rows(
+  result %>% 
+    select(Term = Language_new, Year = first_year, Category = System.New) %>%
+    mutate(Type = "Language (First Description)"),
+  system_first_use %>%
+    select(Term = Language, Year = system_first_year, Category = System.New) %>%
+    mutate(Type = "System (First Use)")
+) %>% distinct()
+
+# Step 4: Plot with chronological Y-axis ordering
+ggplot(combined_data, aes(x = Year, y = Category, color = Category)) +
+  geom_point(aes(shape = Type), size = 3, alpha = 0.8) +
+  geom_text_repel(
+    aes(label = ifelse(Type == "Language (First Description)", Term, "")),
+    size = 3, 
+    max.overlaps = 20,
+    segment.color = "grey50",
+    direction = "y"  # Ensures labels stay aligned vertically
+  ) +
+  scale_x_continuous(breaks = seq(1900, 2025, 10)) +
+  scale_shape_manual(values = c("Language (First Description)" = 16,  # Circle
+                               "System (First Use)" = 17)) +         # Triangle
+  labs(
+    title = "Chronology of First Descriptive Studies",
+    subtitle = "Triangles (▲): First use of a system | Circles (●): First description of a language (labels)",
+    x = "Year",
+    y = "System Category (Ordered by First Occurrence)",
+    color = "System",
+    shape = "Element Type"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    panel.grid.major.y = element_line(color = "grey90"),
+    axis.text.y = element_text(face = "bold")
+  )
+
+```
+
+
+```{r FIG14-2 System-Language Discovery Relationships}
+
+#png("Fig.14-2 System-Language Discovery Relationships.png", units="in", width=10, height=10, res=200)
+library(ggraph)
+library(igraph)
+library(stringr)
+
+# 1. Prepare edge data with Year
+edges <- bind_rows(
+  result %>% 
+    select(from = System.New, to = Language_new, Year = first_year) %>%
+    mutate(Relationship = "First Description"),
+  system_first_use %>%
+    select(from = System.New, to = Language, Year = system_first_year) %>%
+    mutate(Relationship = "First System Use")
+) %>% 
+  distinct() %>%
+  filter(!is.na(Year))
+
+# 2. Create graph with node types
+g <- graph_from_data_frame(edges, directed = TRUE) %>%
+  set_vertex_attr("type", 
+                 value = ifelse(V(.)$name %in% edges$from, "System", "Language"))
+
+# 3. Plot with clear labels
+set.seed(123) # For reproducible layout
+ggraph(g, layout = "fr") +
+  # Edges (colored by year)
+  geom_edge_arc(
+    aes(color = Year),
+    strength = 0.1,
+    arrow = arrow(length = unit(2.5, "mm")),
+    edge_width = 0.8,
+    alpha = 0.7
+  ) +
+  # System nodes (triangles)
+  geom_node_point(
+    aes(filter = type == "System"),
+    shape = 15, size = 9, color = "#D55E00" # Red-orange
+  ) +
+  # Language nodes (circles)
+  geom_node_point(
+    aes(filter = type == "Language"),
+    shape = 19, size = 6, color = "#0072B2" # Blue
+  ) +
+  # System labels (bold white text)
+  geom_node_label(
+    aes(filter = type == "System", label = str_wrap(name, 10)),
+    fill = "#D55E00",
+    color = "white",
+    fontface = "bold",
+    size = 3.5,
+    repel = TRUE,
+    box.padding = 1
+  ) +
+  # Language labels (blue text)
+  geom_node_label(
+    aes(filter = type == "Language", label = str_wrap(name, 10)),
+    fill = alpha("white", 0.8),
+    color = "#0072B2",
+    size = 3,
+    repel = TRUE,
+    box.padding = 0.5,
+    label.padding = unit(0.15, "lines")
+  ) +
+  # Visual tuning
+  scale_edge_color_gradient(
+    low = "#F0E442", high = "#CC79A7", # Yellow to pink
+    breaks = scales::pretty_breaks(n = 5)
+  ) +
+  labs(
+    title = "System-Language Network in First Descriptive Studies",
+    subtitle = "▲ Systems (orange) ● Languages (blue)\nEdge color = Year of first association",
+    edge_color = "Year"
+  ) +
+  theme_graph(base_family = "sans") +
+  theme(legend.position = "bottom",
+        plot.title = element_text(face = "bold"))
+```
+
+
+```{r FIG14-3 Heatmap of System-Language Pairs}
+
+#png("Fig.14-3 Heatmap of System-Language Pairs.png", units="in", width=10, height=10, res=200)
+
+# Create co-occurrence matrix
+heatmap_data <- result %>%
+  bind_rows(system_first_use %>% rename(Language_new = Language)) %>%
+  count(System.New, Language_new) %>%
+  complete(System.New, Language_new, fill = list(n = 0))
+
+ggplot(heatmap_data, aes(x = System.New, y = reorder(Language_new, n), fill = n)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = ifelse(n > 0, n, "")), color = "white", size = 3) +
+  scale_fill_gradient(low = "#f7fbff", high = "#08519c") +
+  labs(
+    title = "System-Language Descriptive Study Frequency",
+    x = "System",
+    y = "Language",
+    fill = "Number\nof Studies"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+```{r FIG15-1 Rank Frequency in Different Study Types}
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Step 1: Clean and separate Rank values
+rank_data <- df %>%
+  # Separate multiple ranks into rows
+  separate_rows(Rank, sep = ",\\s*") %>%
+  mutate(Rank = trimws(Rank)) 
+
+# Step 2: Distribution of Ranks by Orientation
+rank_distribution <- rank_data %>%
+  count(Orientation, Rank) %>%
+  group_by(Orientation) %>%
+  mutate(Percentage = n / sum(n) * 100) %>%
+  ungroup()
+
+# Step 3: Visualization
+#png("Fig.15-1 Rank Frequency in Different Study Types.png", units="in", width=10, height=3, res=200)
+ggplot(rank_distribution, aes(x = n, y = Rank)) +
+  geom_col(fill = "darkred", alpha = 0.8) +
+  labs(title = "Rank Frequency in Different Study Types",
+       x = "Number of Occurrences", y = "Rank") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))+
+  facet_wrap(~Orientation)
+
+
+```
+  
+```{r FIG15-2 Rank-Orientation Frequency Heatmap}
+#png("Fig.15-2 Rank-Orientation Frequency Heatmap.png", units="in", width=10, height=3, res=200)
+
+rank_data %>%
+  count(Orientation, Rank) %>%
+  ggplot(aes(x = Orientation, y = Rank, fill = n)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = n), color = "black") +
+  scale_fill_gradient(low = "#f7fbff", high = "#08519c") +
+  labs(
+    title = "Rank-Orientation Frequency Heatmap",
+    x = "Orientation",
+    y = "Rank",
+    fill = "Count"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(hjust = 0.5))
+
+```
+
+```{r FIG16 Chronological Development of Ranks}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Step 1: Prepare the data
+rank_year_data <- df %>%
+  filter(Orientation == "descriptive")%>%
+  # Separate multiple ranks into rows
+  separate_rows(Rank, sep = ",\\s*") %>%
+  mutate(
+    Rank = trimws(Rank),
+    Year = as.numeric(Year)
+  ) %>%
+  # Filter valid years and non-empty ranks
+  filter(
+    !is.na(Rank), 
+    Rank != "",
+    !is.na(Year),
+    Year >= 1900  # Adjust based on your data's time range
+  )
+
+# Step 2: Calculate rank frequency by year
+rank_trend <- rank_year_data %>%
+  count(Year, Rank) %>%
+  complete(Year, Rank, fill = list(n = 0))  # Fill missing year-rank combinations
+
+# Step 3: Visualize as line plot
+
+#png("Fig.16 Chronological Development of Ranks in Descriptive Studies.png", units="in", width=10, height=4, res=200)
+ggplot(rank_trend, aes(x = Year, y = n, color = Rank)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6)) +
+  scale_y_continuous(breaks = pretty_breaks()) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Chronological Development of Ranks in Descriptive Studies",
+    subtitle = "Frequency of rank usage over time",
+    x = "Year",
+    y = "Number of Studies",
+    color = "Rank"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(hjust = 0.5)
+  )
+```
+
+```{r FIG17-1 language rank alluvial in all studies}
+library(ggalluvial)
+
+# Step 1: Prepare the data
+flow_data <- df %>%
+  # 1. Separate multiple languages and ranks
+  separate_rows(Language, sep = ",\\s*") %>%
+  separate_rows(Rank, sep = ",\\s*") %>%
+  mutate(
+    Language = trimws(Language),
+    Rank = trimws(Rank),
+    Year = as.numeric(Year)
+  ) %>%
+  
+  # 2. Filter valid entries
+  filter(!is.na(Language), Language != "",
+         !is.na(Rank), Rank != "",
+         !is.na(Year)) %>%
+  
+  # 3. For each language, identify first study year and rank
+  group_by(Language) %>%
+  mutate(
+    first_year = min(Year, na.rm = TRUE),
+    is_first_study = (Year == first_year)
+  ) %>%
+  
+  # 4. Split into first and subsequent studies
+  group_by(Language, is_first_study) %>%
+  summarise(
+    Ranks = paste(unique(Rank), collapse = ", "),  # Combine multiple ranks per study
+    .groups = "drop"
+  ) %>%
+  
+  # 5. Reshape for alluvial plot
+  pivot_wider(
+    names_from = is_first_study,
+    values_from = Ranks,
+    names_prefix = "rank_"
+  ) %>%
+  rename(first_rank = rank_TRUE, subsequent_rank = rank_FALSE) %>%
+  
+  # 6. Separate combined ranks into rows
+  separate_rows(first_rank, sep = ",\\s*") %>%
+  separate_rows(subsequent_rank, sep = ",\\s*") %>%
+  filter(!is.na(first_rank), !is.na(subsequent_rank)) %>%
+  
+  # 7. Count transitions
+  count(Language, first_rank, subsequent_rank) %>%
+  filter(n >= 1)  # Remove rare transitions (adjust threshold as needed)
+
+# Step 2: Create alluvial plot
+ggplot(flow_data,
+       aes(axis1 = factor(Language),          # Left: Languages
+           axis2 = factor(first_rank),        # Middle: First rank used
+           axis3 = factor(subsequent_rank),   # Right: Subsequent ranks
+           y = n)) +
+  
+  # Flow between axes
+  geom_alluvium(aes(fill = first_rank), 
+               alpha = 0.8, 
+               width = 1/8,
+               curve_type = "sigmoid") +  # Smoother curves
+  
+  # Stratum labels
+  geom_stratum(width = 1/8, 
+              fill = "grey95",
+              color = "grey50") +
+  geom_text(stat = "stratum",
+            aes(label = after_stat(stratum)),
+            size = 3.5,
+            min.y = 3) +  # Only label strata with n >= 3
+  
+  # Visual customization
+  scale_x_discrete(limits = c("Language", "First Rank", "Subsequent Rank"),
+                   expand = c(0.05, 0.05)) +
+  scale_fill_brewer(palette = "Set2", name = "First Rank") +
+  labs(
+    title = "Evolution of Ranks in Language Studies",
+    subtitle = "Flow from first-described rank to subsequent ranks",
+    y = "Number of Studies"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "right",
+    axis.text.y = element_blank(),
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  )
+
+# Optional: Save high-resolution plot
+#ggsave("Fig.17-1 rank_flow_alluvial.png", width = 12, height = 8, dpi = 300)
+
+```
+
+
+```{r FIG17-2 language rank alluvial in descriptive studies}
+
+# Step 1: Prepare the data
+flow_data_descriptive <- df %>%
+  filter(Orientation == "descriptive")%>%
+  # 1. Separate multiple languages and ranks
+  separate_rows(Language, sep = ",\\s*") %>%
+  separate_rows(Rank, sep = ",\\s*") %>%
+  mutate(
+    Language = trimws(Language),
+    Rank = trimws(Rank),
+    Year = as.numeric(Year)
+  ) %>%
+  
+  # 2. Filter valid entries
+  filter(!is.na(Language), Language != "",
+         !is.na(Rank), Rank != "",
+         !is.na(Year)) %>%
+  
+  # 3. For each language, identify first study year and rank
+  group_by(Language) %>%
+  mutate(
+    first_year = min(Year, na.rm = TRUE),
+    is_first_study = (Year == first_year)
+  ) %>%
+  
+  # 4. Split into first and subsequent studies
+  group_by(Language, is_first_study) %>%
+  summarise(
+    Ranks = paste(unique(Rank), collapse = ", "),  # Combine multiple ranks per study
+    .groups = "drop"
+  ) %>%
+  
+  # 5. Reshape for alluvial plot
+  pivot_wider(
+    names_from = is_first_study,
+    values_from = Ranks,
+    names_prefix = "rank_"
+  ) %>%
+  rename(first_rank = rank_TRUE, subsequent_rank = rank_FALSE) %>%
+  
+  # 6. Separate combined ranks into rows
+  separate_rows(first_rank, sep = ",\\s*") %>%
+  separate_rows(subsequent_rank, sep = ",\\s*") %>%
+  filter(!is.na(first_rank), !is.na(subsequent_rank)) %>%
+  
+  # 7. Count transitions
+  count(Language, first_rank, subsequent_rank) %>%
+  filter(n >= 1)  # Remove rare transitions (adjust threshold as needed)
+
+# Step 2: Create alluvial plot
+ggplot(flow_data_descriptive,
+       aes(axis1 = factor(Language),          # Left: Languages
+           axis2 = factor(first_rank),        # Middle: First rank used
+           axis3 = factor(subsequent_rank),   # Right: Subsequent ranks
+           y = n)) +
+  
+  # Flow between axes
+  geom_alluvium(aes(fill = first_rank), 
+               alpha = 0.8, 
+               width = 1/8,
+               curve_type = "sigmoid") +  # Smoother curves
+  
+  # Stratum labels
+  geom_stratum(width = 1/8, 
+              fill = "grey95",
+              color = "grey50") +
+  geom_text(stat = "stratum",
+            aes(label = after_stat(stratum)),
+            size = 3.5,
+            min.y = 3) +  # Only label strata with n >= 3
+  
+  # Visual customization
+  scale_x_discrete(limits = c("Language", "First Rank", "Subsequent Rank"),
+                   expand = c(0.05, 0.05)) +
+  scale_fill_brewer(palette = "Set2", name = "First Rank") +
+  labs(
+    title = "Evolution of Ranks in Descriptive Studies",
+    subtitle = "Flow from first-described rank to subsequent ranks",
+    y = "Number of Studies"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "right",
+    axis.text.y = element_blank(),
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  )
+
+# Optional: Save high-resolution plot
+#ggsave("Fig.17-2 rank_flow_alluvial in descriptive studies.png", width = 12, height = 8, dpi = 300)
+
+```
+
+```{r FIG17-3 top 10 language and rank alluvial in descriptive studies}
+
+library(ggalluvial)
+
+# Step 1: Verify raw data structure
+head(df %>% select(Language, Rank, Year))
+
+# Step 2: Identify top languages (with proper counting)
+top_languages <- df %>%
+  filter(Orientation == "descriptive")%>%
+  separate_rows(Language, sep = ",\\s*") %>%
+  mutate(Language = trimws(Language)) %>%
+  filter(!is.na(Language), Language != "") %>%
+  count(Language, sort = TRUE) %>%
+  slice_head(n = 10) %>%
+  pull(Language)
+
+# Step 3: Prepare flow data with verification checks
+flow_data <- df %>%
+  # Separate and clean data
+  separate_rows(Language, sep = ",\\s*") %>%
+  separate_rows(Rank, sep = ",\\s*") %>%
+  mutate(
+    Language = trimws(Language),
+    Rank = trimws(Rank),
+    Year = as.numeric(Year)
+  ) %>%
+  
+  # Filter to top languages and valid entries
+  filter(
+    Language %in% top_languages,
+    !is.na(Rank), Rank != "",
+    !is.na(Year)
+  ) %>%
+  
+  # Debug checkpoint 1
+  {cat("Rows after initial filtering:", nrow(.), "\n"); .} %>%
+  
+  # Identify first studies
+  group_by(Language) %>%
+  mutate(
+    first_year = min(Year, na.rm = TRUE),
+    is_first_study = (Year == first_year)
+  ) %>%
+  
+  # Debug checkpoint 2
+  {cat("Unique languages:", n_distinct(.$Language), "\n"); .} %>%
+  
+  # Split first vs subsequent
+  group_by(Language, is_first_study) %>%
+  summarise(
+    Ranks = paste(unique(Rank), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  
+  # Reshape
+  pivot_wider(
+    names_from = is_first_study,
+    values_from = Ranks,
+    names_prefix = "rank_"
+  ) %>%
+  rename(
+    first_rank = rank_TRUE,
+    subsequent_rank = rank_FALSE
+  ) %>%
+  
+  # Separate combined ranks
+  separate_rows(first_rank, sep = ",\\s*") %>%
+  separate_rows(subsequent_rank, sep = ",\\s*") %>%
+  
+  # Debug checkpoint 3
+  {cat("Rows after separating ranks:", nrow(.), "\n"); .} %>%
+  
+  # Count transitions
+  count(Language, first_rank, subsequent_rank) %>%
+  
+  # Final filter
+  filter(n >= 1)  # Start with no minimum to verify data
+
+# Step 4: Verify prepared data
+print(head(flow_data, 10))
+cat("Total flows:", nrow(flow_data), "\n")
+
+# Step 5: Plot only if data exists
+if (nrow(flow_data) > 0) {
+  ggplot(flow_data,
+         aes(axis1 = factor(Language, levels = top_languages),
+             axis2 = factor(first_rank),
+             axis3 = factor(subsequent_rank),
+             y = n)) +
+    
+    # Darker alluvial flows with black borders
+    geom_alluvium(aes(fill = first_rank), 
+                 width = 1/6,
+                 alpha = 0.9,
+                 color = "black",      # Add contrasting borders
+                 size = 0.3) +         # Border thickness
+    
+    # Darker stratum with white text
+    geom_stratum(width = 1/6, 
+                fill = "#333333",      # Dark gray background
+                color = "white") +     # White borders
+    
+    # Improved labels
+    geom_text(stat = "stratum", 
+              aes(label = str_wrap(after_stat(stratum), width = 10)),
+              color = "white",         # White text for contrast
+              size = 3.5,
+              fontface = "bold") +
+    
+    # Darker color palette (RColorBrewer Dark2)
+    scale_fill_brewer(palette = "Dark2", 
+                     guide = guide_legend(title = "First Rank",
+                                          override.aes = list(color = NA))) +
+    
+    # Enhanced titles and theme
+    labs(
+      title = "Rank Evolution in Top 10 Languages in Descriptive Studies",
+      subtitle = "Flow from initial to subsequent analytical focus",
+      x = NULL,
+      y = "Number of Studies"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.background = element_rect(fill = "white", color = NA),
+      panel.background = element_rect(fill = "white"),
+      legend.background = element_rect(fill = "white"),
+      text = element_text(color = "black"),
+      axis.text.x = element_text(color = "black", face = "bold"),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5, color = "black")
+    )
+  
+} else {
+  message("No valid data to plot. Check filtering steps.")
+}
+
+#ggsave("Fig.17-3 Rank Evolution in Top 10 Languages in Descriptive Studies.png", width = 12, height = 8, dpi = 300)
+```
+
+
+```{r metafunction orientation and year}
+library(scales)
+
+df_metafunction <- df%>%
+  filter(Metafunction != "na")
+
+ggplot(df_metafunction, aes(x = Year, y = ..count.., color = Orientation)) +
+  geom_freqpoly(binwidth = 5, linewidth = 1) +  # 5-year bins
+  facet_wrap(~ Metafunction, scales = "free_y") +
+  scale_x_continuous(breaks = pretty_breaks(n = 8)) +
+  scale_color_brewer(palette = "Set1") +
+  labs(title = "Metafunction Trends by Research Orientation",
+       y = "Number of Studies") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+#png("Fig.18-1 Metafunction Trends by Research Orientation.png", units="in", width=10, height=8, res=200)
+```
+
+```{r FIG18-1 Metafunction Heatmap}
+# Step 3: Heatmap of frequencies
+#png("Fig.18-1 Metafunction Heatmap.png", units="in", width=10, height=6, res=200)
+df_metafunction%>%
+  count(Metafunction, Orientation, Year) %>%
+  complete(Metafunction, Orientation, Year, fill = list(n = 0)) %>%
+  ggplot(aes(x = Year, y = Metafunction, fill = n)) +
+  geom_tile() +
+  facet_wrap(~ Orientation, ncol = 1) +
+  scale_fill_gradient(low = "white", high = "#3B7BBD",
+                     trans = "sqrt") +  # Square root scale for better contrast
+  scale_x_continuous(breaks = pretty_breaks(n = 8)) +
+  labs(title = "Metafunction Heatmap",
+       subtitle = "Color intensity shows study count") +
+  theme_minimal() 
+
+
+```
+
+```{r metafunction summary table}
+# Step 6: Statistical summary table
+metafunction_summary <- df_metafunction %>%
+  group_by(Orientation, Metafunction) %>%
+  summarise(
+    First_Year = min(Year, na.rm = TRUE),
+    Last_Year = max(Year, na.rm = TRUE),
+    Total_Studies = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(Orientation, -Total_Studies)
+
+print(metafunction_summary)
+```
+
+```{r FIG18-2 Metafunctions dataframe}
+
+library(data.table)
+setDT(df)  # Convert to data.table
+
+# Split and expand metafunctions
+top_meta <- df[, .(metafunctions = unlist(str_split(str_trim(Metafunction), "\\+"))), by = 1:nrow(df)]
+
+# First trim whitespace
+top_meta[, metafunctions := str_trim(metafunctions)]
+
+# Rename using fcase with proper default handling
+top_meta[, metafunctions := fcase(
+  metafunctions == "exp", "experiential",
+  metafunctions == "int", "interpersonal",
+  metafunctions == "tex", "textual",
+  metafunctions %in% c("id", "ideational"), "ideational",
+  metafunctions == "all", "all",
+  rep(TRUE, .N), metafunctions  # This acts as the default
+)]
+
+# Handle "all" (expand into 4)
+all_rows <- top_meta[metafunctions == "all"]
+if (nrow(all_rows) > 0) {
+  all_expanded <- all_rows[, .(metafunctions = c("experiential", "interpersonal", "logical", "textual")), by = nrow]
+  top_meta <- rbind(top_meta[metafunctions != "all"], all_expanded)
+}
+
+# Handle "ideational" (expand into 2)
+ideo_rows <- top_meta[metafunctions == "ideational"]
+if (nrow(ideo_rows) > 0) {
+  ideo_expanded <- ideo_rows[, .(metafunctions = c("experiential", "logical")), by = nrow]
+  top_meta <- rbind(top_meta[metafunctions != "ideational"], ideo_expanded)
+}
+
+```
+
+```{r FIG18-2 Metafunctions line graph}
+
+# 1. Merge the processed metafunctions with original data
+# First ensure we have row IDs to merge on
+df[, nrow := .I]  # Add row IDs to original data
+
+# Merge with top_meta (which already has row_id from the by=1:nrow(df) earlier)
+merged_data <- merge(df[, .(nrow, Orientation, Year)], 
+                     top_meta, 
+                     by = "nrow", 
+                     all.x = TRUE)%>%
+  filter(metafunctions !="na")
+
+# 2. Count occurrences by Year, Metafunction, and Orientation
+count_data <- merged_data[, .(count = .N), 
+                          by = .(Year, metafunctions, Orientation)]
+
+# 3. Create the line plot
+#png("Fig.18-2 Metafunction Trends by Research Orientation Over Time.png", units="in", width=10, height=6, res=200)
+ggplot(count_data, aes(x = Year, y = count, color = metafunctions, group = metafunctions)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ Orientation, ncol = 1, scales = "free_y") +
+  labs(title = "Metafunction Trends by Research Orientation Over Time",
+       x = "Year",
+       y = "Number of Instances",
+       color = "Metafunction") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        strip.text = element_text(face = "bold", size = 10),
+        axis.text = element_text(size = 9),
+        plot.title = element_text(size = 14, hjust = 0.5)) +
+  scale_color_brewer(palette = "Set1")  # Use a nice color palette
+```
+
+
+```{r FIG19-1 language Metafunction alluvial in all studies}
+library(ggalluvial)
+
+# Step 1: Prepare the data
+flow_data <- df %>%
+  # 1. Separate multiple languages and Metafunctions
+  filter(Metafunction !="na")%>%
+  separate_rows(Language, sep = ",\\s*") %>%
+  mutate(
+    Language = trimws(Language),
+    Metafunction = trimws(Metafunction),
+    Year = as.numeric(Year)
+  ) %>%
+  
+  # 2. Filter valid entries
+  filter(!is.na(Language), Language != "",
+         !is.na(Metafunction), Metafunction != "",
+         !is.na(Year)) %>%
+  
+  # 3. For each language, identify first study year and Metafunction
+  group_by(Language) %>%
+  mutate(
+    first_year = min(Year, na.rm = TRUE),
+    is_first_study = (Year == first_year)
+  ) %>%
+  
+  # 4. Split into first and subsequent studies
+  group_by(Language, is_first_study) %>%
+  summarise(
+    Metafunctions = paste(unique(Metafunction), collapse = ", "),  # Combine multiple Metafunctions per study
+    .groups = "drop"
+  ) %>%
+  
+  # 5. Reshape for alluvial plot
+  pivot_wider(
+    names_from = is_first_study,
+    values_from = Metafunctions,
+    names_prefix = "Metafunction_"
+  ) %>%
+  rename(first_Metafunction = Metafunction_TRUE, subsequent_Metafunction = Metafunction_FALSE) %>%
+  
+  # 6. Separate combined Metafunctions into rows
+  separate_rows(first_Metafunction, sep = ",\\s*") %>%
+  separate_rows(subsequent_Metafunction, sep = ",\\s*") %>%
+  filter(!is.na(first_Metafunction), !is.na(subsequent_Metafunction)) %>%
+  
+  # 7. Count transitions
+  count(Language, first_Metafunction, subsequent_Metafunction) %>%
+  filter(n >= 1)  # Remove rare transitions (adjust threshold as needed)
+
+# Step 2: Create alluvial plot
+ggplot(flow_data,
+       aes(axis1 = factor(Language),          # Left: Languages
+           axis2 = factor(first_Metafunction),        # Middle: First Metafunction used
+           axis3 = factor(subsequent_Metafunction),   # Right: Subsequent Metafunctions
+           y = n)) +
+  
+  # Flow between axes
+  geom_alluvium(aes(fill = first_Metafunction), 
+               alpha = 0.8, 
+               width = 1/8,
+               curve_type = "sigmoid") +  # Smoother curves
+  
+  # Stratum labels
+  geom_stratum(width = 1/8, 
+              fill = "grey95",
+              color = "grey50") +
+  geom_text(stat = "stratum",
+            aes(label = str_wrap(after_stat(stratum), width = 10)),
+            size = 3.5,
+            min.y = 3) +  # Only label strata with n >= 3
+  
+  # Visual customization
+  scale_x_discrete(limits = c("Language", "First Metafunction", "Subsequent Metafunction"),
+                   expand = c(0.05, 0.05)) +
+  scale_fill_brewer(palette = "Set2", name = "First Metafunction") +
+  labs(
+    title = "Evolution of Metafunctions in Language Studies",
+    subtitle = "Flow from first-described Metafunction to subsequent Metafunctions",
+    y = "Number of Studies"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "right",
+    axis.text.y = element_blank(),
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  )
+
+# Optional: Save high-resolution plot
+#ggsave("Fig.19-1 Metafunction_flow_alluvial.png", width = 12, height = 8, dpi = 300)
+
+```
+
+```{r FIG19-2 language Metafunction alluvial in descriptive studies}
+
+# Step 1: Prepare the data
+# Merge with top_meta (which already has row_id from the by=1:nrow(df) earlier)
+flow_data_descriptive <- merge(df[, .(nrow, Orientation, Year, Language)], 
+                     top_meta, 
+                     by = "nrow", 
+                     all.x = TRUE)%>%
+  filter(metafunctions !="na")%>%
+  filter(Orientation == "descriptive")%>%
+  # 1. Separate multiple languages and Metafunctions
+  separate_rows(Language, sep = ",\\s*") %>%
+  mutate(
+    Language = trimws(Language),
+    Metafunction = trimws(metafunctions),
+    Year = as.numeric(Year)
+  ) %>%
+  
+  # 2. Filter valid entries
+  filter(!is.na(Language), Language != "",
+         !is.na(metafunctions), metafunctions != "",
+         !is.na(Year)) %>%
+  
+  # 3. For each language, identify first study year and Metafunction
+  group_by(Language) %>%
+  mutate(
+    first_year = min(Year, na.rm = TRUE),
+    is_first_study = (Year == first_year)
+  ) %>%
+  
+  # 4. Split into first and subsequent studies
+  group_by(Language, is_first_study) %>%
+  summarise(
+    Metafunctions = paste(unique(metafunctions), collapse = ", "),  # Combine multiple Metafunctions per study
+    .groups = "drop"
+  ) %>%
+  
+  # 5. Reshape for alluvial plot
+  pivot_wider(
+    names_from = is_first_study,
+    values_from = Metafunctions,
+    names_prefix = "Metafunction_"
+  ) %>%
+  rename(first_Metafunction = Metafunction_TRUE, subsequent_Metafunction = Metafunction_FALSE) %>%
+  
+  # 6. Separate combined Metafunctions into rows
+  separate_rows(first_Metafunction, sep = ",\\s*") %>%
+  separate_rows(subsequent_Metafunction, sep = ",\\s*") %>%
+  filter(!is.na(first_Metafunction), !is.na(subsequent_Metafunction)) %>%
+  
+  # 7. Count transitions
+  count(Language, first_Metafunction, subsequent_Metafunction) %>%
+  filter(n >= 1)  # Remove rare transitions (adjust threshold as needed)
+
+# Step 2: Create alluvial plot
+#png("Fig.19-2 Metafunction_flow_alluvial in descriptive studies.png", units="in", width=10, height=6, res=200)
+ggplot(flow_data_descriptive,
+       aes(axis1 = factor(Language),          # Left: Languages
+           axis2 = factor(first_Metafunction),        # Middle: First Metafunction used
+           axis3 = factor(subsequent_Metafunction),   # Right: Subsequent Metafunctions
+           y = n)) +
+  
+  # Flow between axes
+  geom_alluvium(aes(fill = first_Metafunction), 
+               alpha = 0.8, 
+               width = 1/8,
+               curve_type = "sigmoid") +  # Smoother curves
+  
+  # Stratum labels
+  geom_stratum(width = 1/8, 
+              fill = "grey95",
+              color = "grey50") +
+  geom_text(stat = "stratum",
+            aes(label = after_stat(stratum)),
+            size = 3.5,
+            min.y = 3) +  # Only label strata with n >= 3
+  
+  # Visual customization
+  scale_x_discrete(limits = c("Language", "First Metafunction", "Subsequent Metafunction"),
+                   expand = c(0.05, 0.05)) +
+  scale_fill_brewer(palette = "Set2", name = "First Metafunction") +
+  labs(
+    title = "Evolution of Metafunctions in Descriptive Studies",
+    subtitle = "Flow from first-described Metafunction to subsequent Metafunctions",
+    y = "Number of Studies"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "right",
+    axis.text.y = element_blank(),
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  )
+
+```
+
+
+```{r FIG19-3 top 10 language and Metafunction alluvial in descriptive studies}
+
+library(ggalluvial)
+
+# Step 1: Verify raw data structure
+head(df %>% select(Language, Metafunction, Year))
+
+# Step 2: Identify top languages (with proper counting)
+top_languages <- df %>%
+  filter(Orientation == "descriptive")%>%
+  separate_rows(Language, sep = ",\\s*") %>%
+  mutate(Language = trimws(Language)) %>%
+  filter(!is.na(Language), Language != "") %>%
+  count(Language, sort = TRUE) %>%
+  slice_head(n = 10) %>%
+  pull(Language)
+
+# Step 3: Prepare flow data with verification checks
+flow_data <- df %>%
+  # Separate and clean data
+  separate_rows(Language, sep = ",\\s*") %>%
+  separate_rows(Metafunction, sep = ",\\s*") %>%
+  mutate(
+    Language = trimws(Language),
+    Metafunction = trimws(Metafunction),
+    Year = as.numeric(Year)
+  ) %>%
+  
+  # Filter to top languages and valid entries
+  filter(
+    Language %in% top_languages,
+    !is.na(Metafunction), Metafunction != "",
+    !is.na(Year)
+  ) %>%
+  
+  # Debug checkpoint 1
+  {cat("Rows after initial filtering:", nrow(.), "\n"); .} %>%
+  
+  # Identify first studies
+  group_by(Language) %>%
+  mutate(
+    first_year = min(Year, na.rm = TRUE),
+    is_first_study = (Year == first_year)
+  ) %>%
+  
+  # Debug checkpoint 2
+  {cat("Unique languages:", n_distinct(.$Language), "\n"); .} %>%
+  
+  # Split first vs subsequent
+  group_by(Language, is_first_study) %>%
+  summarise(
+    Metafunctions = paste(unique(Metafunction), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  
+  # Reshape
+  pivot_wider(
+    names_from = is_first_study,
+    values_from = Metafunctions,
+    names_prefix = "Metafunction_"
+  ) %>%
+  rename(
+    first_Metafunction = Metafunction_TRUE,
+    subsequent_Metafunction = Metafunction_FALSE
+  ) %>%
+  
+  # Separate combined Metafunctions
+  separate_rows(first_Metafunction, sep = ",\\s*") %>%
+  separate_rows(subsequent_Metafunction, sep = ",\\s*") %>%
+  
+  # Debug checkpoint 3
+  {cat("Rows after separating Metafunctions:", nrow(.), "\n"); .} %>%
+  
+  # Count transitions
+  count(Language, first_Metafunction, subsequent_Metafunction) %>%
+  
+  # Final filter
+  filter(n >= 1)  # Start with no minimum to verify data
+
+# Step 4: Verify prepared data
+print(head(flow_data, 10))
+cat("Total flows:", nrow(flow_data), "\n")
+
+# Step 5: Plot only if data exists
+if (nrow(flow_data) > 0) {
+  ggplot(flow_data,
+         aes(axis1 = factor(Language, levels = top_languages),
+             axis2 = factor(first_Metafunction),
+             axis3 = factor(subsequent_Metafunction),
+             y = n)) +
+    
+    # Darker alluvial flows with black borders
+    geom_alluvium(aes(fill = first_Metafunction), 
+                 width = 1/6,
+                 alpha = 0.9,
+                 color = "black",      # Add contrasting borders
+                 size = 0.3) +         # Border thickness
+    
+    # Darker stratum with white text
+    geom_stratum(width = 1/6, 
+                fill = "#333333",      # Dark gray background
+                color = "white") +     # White borders
+    
+    # Improved labels
+    geom_text(stat = "stratum", 
+              aes(label = str_wrap(after_stat(stratum), width = 10)),
+              color = "white",         # White text for contrast
+              size = 3.5,
+              fontface = "bold") +
+    
+    # Darker color palette (RColorBrewer Dark2)
+    scale_fill_brewer(palette = "Dark2", 
+                     guide = guide_legend(title = "First Metafunction",
+                                          override.aes = list(color = NA))) +
+    
+    # Enhanced titles and theme
+    labs(
+      title = "Metafunction Evolution in Top 10 Languages in Descriptive Studies",
+      subtitle = "Flow from initial to subsequent analytical focus",
+      x = NULL,
+      y = "Number of Studies"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.background = element_rect(fill = "white", color = NA),
+      panel.background = element_rect(fill = "white"),
+      legend.background = element_rect(fill = "white"),
+      text = element_text(color = "black"),
+      axis.text.x = element_text(color = "black", face = "bold"),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5, color = "black")
+    )
+  
+} else {
+  message("No valid data to plot. Check filtering steps.")
+}
+
+#ggsave("Fig.19-3 Metafunction Evolution in Top 10 Languages in Descriptive Studies.png", width = 12, height = 8, dpi = 300)
+```
+
+
+```{r FIG20 overall approach trend}
+library(scales) # For better date formatting
+library(forcats)
+
+# Step 1: Clean and prepare the data
+approach_data <- df %>%
+  rename_with(~ "Approach", .cols = contains("Approach", ignore.case = TRUE)) %>%
+  # Filter out NA, "na", "ns", and empty values
+  filter(!is.na(Approach),
+         !Approach %in% c("na", "ns", ""),
+         !grepl("^\\s*$", Approach))  # Remove whitespace-only entries
+
+# Step 3: Create trend plot
+ggplot(approach_data %>% 
+         count(Year, Approach) %>%
+         complete(Year, Approach, fill = list(n = 0)),
+       aes(x = Year, y = n, color = fct_reorder(Approach, -n))) +
+  
+  # Data representation
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE, span = 0.3) +  # Smoother trend line
+  
+  # Labels for the most recent year
+  geom_text_repel(
+    data = ~ .x %>% 
+      group_by(Approach) %>% 
+      filter(Year == max(Year)),
+    aes(label = Approach),
+    direction = "y",
+    xlim = c(max(approach_data$Year, na.rm = TRUE) + 2, NA),
+    hjust = 0,
+    segment.color = NA,
+    size = 4,
+    show.legend = FALSE
+  ) +
+  
+  # Visual polish
+  scale_x_continuous(breaks = pretty_breaks(n = 8)) +
+  scale_y_continuous(breaks = pretty_breaks()) +
+  scale_color_viridis_d(option = "D", end = 0.9, guide = "none") +
+  labs(
+    title = "Trends in Research Approaches",
+    x = "Year",
+    y = "Number of Studies",
+    color = "Approach"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(r = 50)  # Space for labels
+  ) +
+  coord_cartesian(clip = "off")
+
+# Save high-quality version
+#ggsave("Fig.20 approach_trends.png", width = 10, height = 3, dpi = 300)
+```
+
+```{r FIG21 Trend of Data Types}
+
+library(tidyverse)
+library(scales)
+library(ggrepel)
+library(patchwork)
+
+# Step 1: Clean and transform Data column
+df_clean <- df %>%
+  mutate(
+    Data = ifelse(is.na(Data) | Data %in% c("na", "ns", ""), 
+                 "unspecified", 
+                 Data),
+    Year = as.numeric(Year)
+  ) %>%
+  filter(!is.na(Year), Year >= 1900) %>%
+  separate_rows(Data, sep = ",\\s*") %>%
+  mutate(Data = trimws(Data))
+
+# Step 2: Create color palette based on data frequency
+data_levels <- df_clean %>% 
+  count(Data) %>% 
+  arrange(-n) %>% 
+  pull(Data)
+
+# Five maximally distinct colors (colorblind-friendly)
+high_contrast_colors <- c(
+  "#E69F00", # Orange
+  "#56B4E9", # Sky blue
+  "#009E73", # Bluish green
+  "#F0E442", # Yellow
+  "#D55E00", # Vermillion
+  "#0072B2", # Blue
+  "#CC79A7"  # Reddish purple
+)
+
+# Make sure we have enough colors
+if (length(data_levels) > length(high_contrast_colors)) {
+  high_contrast_colors <- colorRampPalette(high_contrast_colors)(length(data_levels))
+}
+
+names(high_contrast_colors) <- data_levels
+
+# Step 3: Create static plot (pie chart)
+static_plot <- df_clean %>%
+  count(Data) %>%
+  mutate(percentage = n / sum(n) * 100,
+         label = paste0(Data, "\n", round(percentage, 1), "%"),
+         Data = factor(Data, levels = data_levels))
+
+static_pie <- ggplot(static_plot, aes(x = "", y = n, fill = Data)) +
+  geom_col(width = 1, color = "white", linewidth = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(
+    aes(label = label),
+    position = position_stack(vjust = 0.5),
+    color = "black", 
+    size = 4,
+    fontface = "bold"
+  ) +
+  scale_fill_manual(values = high_contrast_colors) +
+  labs(title = "Data Types", fill = "Data Type") +
+  theme_void() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    legend.position = "none"
+  )
+
+# Step 4: Create trend plot (line graph)
+trend_data <- df_clean %>%
+  count(Year, Data) %>%
+  complete(Year, Data, fill = list(n = 0)) %>%
+  group_by(Year) %>%
+  mutate(Percent = n / sum(n) * 100) %>%
+  ungroup() %>%
+  mutate(Data = factor(Data, levels = data_levels))
+
+# Create label data with adjusted positions
+label_data <- trend_data %>%
+  group_by(Data) %>%
+  filter(Year == max(Year)) %>%
+  ungroup() %>%
+  mutate(
+    y_offset = seq(-20, 20, length.out = n()), # Stagger labels vertically
+    x_adjust = ifelse(Percent < 5, 2, 0) # Extra space for small percentages
+  )
+
+trend_plot <- ggplot(trend_data, aes(x = Year, y = Percent, color = Data)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(data = ~ filter(.x, Year %% 5 == 0), size = 2) +
+  geom_text_repel(
+    data = label_data,
+    aes(label = Data, y = Percent + y_offset),
+    direction = "y",
+    xlim = c(max(trend_data$Year) + 1, NA),
+    hjust = 0,
+    size = 4,
+    segment.size = 0.2,
+    box.padding = 0.5,
+    force = 1,
+    nudge_x = 1,
+    show.legend = FALSE
+  ) +
+  scale_x_continuous(
+    breaks = seq(1900, 2030, 10),
+    limits = c(min(trend_data$Year), max(trend_data$Year) + 10) # Extra space for labels
+  ) +
+  scale_y_continuous(
+    labels = label_number(suffix = "%"),
+    limits = c(0, NA)
+  ) +
+  scale_color_manual(values = high_contrast_colors) +
+  labs(
+    title = "Trend of Data Types (Yearly Percentage)",
+    y = "Percentage of Studies",
+    x = "Year"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(r = 5) # Increased right margin for labels
+  )
+
+# Step 5: Combine plots using patchwork
+#png("Fig.21 Trend of Data Types.png", units="in", width=10, height=6, res=200)
+combined_plot <- static_pie + trend_plot + 
+  plot_layout(widths = c(1, 2)) +
+  plot_annotation(tag_levels = 'A')
+
+# Display the combined plot
+print(combined_plot)
+
+
+```
+```{r FIG21-1 data type trend lines}
+library(lubridate)
+
+# Modified aggregation for short time spans (2004-2024)
+trend_data <- df_clean %>%
+  # Use 2-year bins instead of 5-year for better resolution
+  mutate(Year_Group = floor(Year/2)*2) %>%  
+  count(Year_Group, Data) %>%
+  complete(Year_Group, Data, fill = list(n = 0)) %>%
+  group_by(Year_Group) %>%
+  mutate(Percent = n / sum(n) * 100) %>%
+  ungroup() %>%
+  mutate(Data = factor(Data, levels = data_levels)) %>%
+  # Use 2-point moving average (instead of 3) for short series
+  group_by(Data) %>%
+  mutate(Smoothed_Percent = zoo::rollmean(Percent, 2, fill = NA, align = "right")) %>%
+  ungroup() %>%
+  filter(!is.na(Smoothed_Percent))  # Remove NA from smoothing
+
+# Create plot with adjusted labeling
+#png("Fig.21-1 Data Type trend lines.png", units="in", width=10, height=5, res=200)
+trend_plot <- ggplot(trend_data, aes(x = Year_Group, y = Smoothed_Percent, color = Data)) +
+  geom_line(linewidth = 1.5) +  # Thicker lines for visibility
+  geom_point(
+    data = ~ filter(.x, Year_Group %% 4 == 0),  # Label every 4 years
+    size = 3, 
+    show.legend = FALSE
+  ) +
+  geom_text_repel(
+    data = ~ .x %>% 
+      group_by(Data) %>% 
+      filter(Year_Group == max(Year_Group)),
+    aes(label = Data),
+    direction = "y",
+    xlim = c(max(trend_data$Year_Group) + 1, NA),  # Reduced padding
+    hjust = 0,
+    size = 4,
+    segment.size = 0.3,
+    box.padding = 0.5,
+    force = 0.5,  # Reduced repulsion force
+    show.legend = FALSE
+  ) +
+  scale_x_continuous(
+    breaks = seq(2004, 2024, by = 4),  # Breaks every 4 years
+    limits = c(2004, 2026)  # Tight axis limits
+  ) +
+  scale_y_continuous(
+    labels = label_number(suffix = "%"),
+    expand = expansion(mult = c(0, 0.1))  # Add 10% headroom
+  ) +
+  scale_color_manual(values = high_contrast_colors) +
+  labs(
+    title = "Data Type Trends (2004-2024 | 2-Year Aggregates)",
+    y = "Percentage of Studies",
+    x = "Year"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotated x-labels
+  )
+trend_plot
+
+
+```
+
+```{r FIG21-2 data type trend small multiples}
+# Option B: Small multiples for clearer comparisons
+#png("Fig.21-2 Data Type trend small multiples.png", units="in", width=10, height=5, res=200)
+trend_plot + facet_wrap(~Data, ncol = 2)
+```
+
+
+```{r FIG21-3 data type trend area chart}
+
+# Alternative visualization option: Area chart
+#png("Fig.21-3 Data Type trend area plot.png", units="in", width=10, height=5, res=200)
+area_plot <- ggplot(trend_data, aes(x = Year_Group, y = Smoothed_Percent, fill = Data)) +
+  geom_area(position = "stack", alpha = 0.8) +
+  scale_fill_manual(values = high_contrast_colors) +
+  labs(title = "Relative Proportion of Data Types Over Time")
+area_plot
+```
+
+
+
+```{r FIG22-1 Top 10 languages data bubble plot}
+
+# Step 1: Count all languages (handling comma-separated values)
+language_counts <- df %>%
+  separate_rows(Language, sep = ",\\s*")%>%
+  mutate(Language = trimws(Language))%>%
+  count(Language, name = "Count") %>%
+  arrange(desc(Count))
+
+# Step 2: Filter for top 10 languages
+top_10_languages <- language_counts %>%
+  slice_max(Count, n = 10) %>%
+  pull(Language)
+
+# Step 3: Prepare data for visualization
+analysis_data <- df %>%
+  mutate(
+    Data = ifelse(is.na(Data) | Data %in% c("na", "ns", ""), 
+                 "unspecified", 
+                 Data),
+    Year = as.numeric(Year)
+  ) %>%
+  # Filter rows containing any of the top 10 families
+  filter(str_detect(Language, paste(top_10_languages, collapse = "|"))) %>%
+  # Select our target columns
+  select(Language, Data) %>%
+  # Separate multi-value rows
+  separate_rows(Language, sep = ",\\s*") %>%
+  # Filter to only keep top 10 families
+  filter(Language %in% top_10_languages) %>%
+  # Remove rows with missing values
+  drop_na() %>%
+  # Count all combinations
+  count(Language, Data, name = "Count") %>%
+  # Calculate proportions within each family
+  group_by(Language) %>%
+  mutate(Proportion = Count / sum(Count)) %>%
+  ungroup()
+
+#png("Fig.22-1 Data and top 10 languages bubble.png", units="in", width=10, height=5, res=200)
+set.seed(42) # For consistent jitter
+ggplot(analysis_data, 
+       aes(x = Data, y = reorder(Language, Count), size = Count, color = Data)) +
+  geom_point(position = position_jitter(width = 0.1, height = 0.1), alpha = 0.8) +
+  scale_size_continuous(range = c(3, 12), 
+                       breaks = c(1, 5, 10, 20)) +
+  scale_color_brewer(palette = "Set2") +
+  labs(title = "Data Type Patterns in Top 10 Languages",
+       x = "Data Type",
+       y = "Language",
+       size = "Study Count",
+       color = "Data Type") +
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "grey90"),
+        legend.position = "right")
+
+```
+
+
+```{r FIG22-2 languages data bubble plot}
+
+# Step 1: Prepare data for visualization
+analysis_data <- df %>%
+  separate_rows(Language, sep = ",\\s*")%>%
+  mutate(Language = trimws(Language))%>%
+  mutate(
+    Data = ifelse(is.na(Data) | Data %in% c("na", "ns", ""), 
+                 "unspecified", 
+                 Data),
+    Year = as.numeric(Year)
+  ) %>%
+  # Select our target columns
+  select(Language, Data) %>%
+ 
+  # Remove rows with missing values
+  drop_na() %>%
+  # Count all combinations
+  count(Language, Data, name = "Count") %>%
+  # Calculate proportions within each family
+  group_by(Language) %>%
+  mutate(Proportion = Count / sum(Count)) %>%
+  ungroup()
+
+#png("Fig.22-2 Data and all languages bubble.png", units="in", width=10, height=8, res=200)
+set.seed(42) # For consistent jitter
+ggplot(analysis_data, 
+       aes(x = Data, y = reorder(Language, Count), size = Count, color = Data)) +
+  geom_point(position = position_jitter(width = 0.1, height = 0.1), alpha = 0.8) +
+  scale_size_continuous(range = c(3, 12), 
+                       breaks = c(1, 5, 10, 20)) +
+  scale_color_brewer(palette = "Set2") +
+  labs(title = "Language-Data Type Patterns",
+       x = "Data Type",
+       y = "Language",
+       size = "Study Count",
+       color = "Data Type") +
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "grey90"),
+        legend.position = "right")
+
+```
+
+
+```{r FIG23-1 System data bar}
+
+# Step 1: Prepare data for visualization
+system_data <- df %>%
+  filter(System != "na")%>%
+  separate_rows(System, sep = ",\\s*") %>%
+  mutate(
+    System.New = case_when(
+      # TRANSITIVITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "transitivity|range|process type|circumstantiation|circumstance of time") ~ "TRANSITIVITY",
+      
+      # ASSESSMENT group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "negotiation|assessment") ~ "ASSESSMENT",
+      
+      # MODALITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "modulation|modality|modal verbs") ~ "MODALITY",
+      
+      # FINITENESS group (case-insensitive)
+      str_detect(str_to_lower(System), "finite") ~ "FINITENESS",
+      
+      # Keep original value if none of the above match
+      TRUE ~ System
+    ),
+    # Convert to factor for better plotting/analysis
+    System.New = as.factor(System.New)
+  )%>%
+  mutate(System.New = trimws(System.New)) %>%
+  mutate(
+    Data = ifelse(is.na(Data) | Data %in% c("na", "ns", ""), 
+                 "unspecified", 
+                 Data),
+    Year = as.numeric(Year)
+  ) %>%
+  # Select our target columns
+  select(System.New, Data) %>%
+ 
+  # Remove rows with missing values
+  drop_na() %>%
+  # Count all combinations
+  count(System.New, Data, name = "Count") %>%
+  # Calculate proportions within each family
+  group_by(System.New) %>%
+  mutate(Proportion = Count / sum(Count)) %>%
+  ungroup()
+
+#png("Fig.23-1 Data_System bar.png", units="in", width=10, height=5, res=200)
+ggplot(system_data, aes(x = reorder(System.New, Proportion), y = Proportion, fill = Data)) +
+  geom_col(position = "stack") +
+  scale_fill_brewer(palette = "Set2") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "System-Data Type Patterns",
+       subtitle = "Proportional view by Data Type",
+       x = "System",
+       y = "Proportion of Studies") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "right")
+
+```
+
+```{r FIG23-2 system and data in top 10 systems}
+# Step 1: Count all Systems (handling comma-separated values)
+System_counts <- df %>%
+  separate_rows(System, sep = ",\\s*")%>%
+  mutate(System = trimws(System))%>%
+  count(System, name = "Count") %>%
+  arrange(desc(Count))
+
+# Step 2: Filter for top 10 Systems
+top_10_Systems <- System_counts %>%
+  slice_max(Count, n = 10) %>%
+  pull(System)
+
+# Step 3: Prepare data for visualization
+analysis_data <- df %>%
+  mutate(
+    Data = ifelse(is.na(Data) | Data %in% c("na", "ns", ""), 
+                 "unspecified", 
+                 Data),
+    Year = as.numeric(Year)
+  ) %>%
+  # Filter rows containing any of the top 10 families
+  filter(str_detect(System, paste(top_10_Systems, collapse = "|"))) %>%
+  # Select our target columns
+  select(System, Data) %>%
+  # Separate multi-value rows
+  separate_rows(System, sep = ",\\s*") %>%
+  # Filter to only keep top 10 families
+  filter(System %in% top_10_Systems) %>%
+  # Remove rows with missing values
+  drop_na() %>%
+  # Count all combinations
+  count(System, Data, name = "Count") %>%
+  # Calculate proportions within each family
+  group_by(System) %>%
+  mutate(Proportion = Count / sum(Count)) %>%
+  ungroup()
+
+#png("Fig.23-2 Data_System bar in top 10 systems.png", units="in", width=10, height=5, res=200)
+ggplot(analysis_data, aes(x = reorder(System, Proportion), y = Proportion, fill = Data)) +
+  geom_col(position = "stack") +
+  scale_fill_brewer(palette = "Set2") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "System-Data Type Patterns in Top 10 Systems",
+       subtitle = "Proportional view by Data Type",
+       x = "System",
+       y = "Proportion of Studies") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "right")
+
+```
+  
+
+```{r FIG24 Approach data bar}
+
+# Step 1: Prepare data for visualization
+approach_data <- df %>%
+  rename_with(~ "Approach", .cols = contains("Approach", ignore.case = TRUE)) %>%
+  # Filter out NA, "na", "ns", and empty values
+  filter(!is.na(Approach),
+         !Approach %in% c("na", "ns", ""),
+         !grepl("^\\s*$", Approach)) %>% # Remove whitespace-only entries
+
+  mutate(
+    Data = ifelse(is.na(Data) | Data %in% c("na", "ns", ""), 
+                 "unspecified", 
+                 Data),
+    Year = as.numeric(Year)
+  ) %>%
+  # Select our target columns
+  select(Approach, Data) %>%
+ 
+  # Remove rows with missing values
+  drop_na() %>%
+  # Count all combinations
+  count(Approach, Data, name = "Count") %>%
+  # Calculate proportions within each family
+  group_by(Approach) %>%
+  mutate(Proportion = Count / sum(Count)) %>%
+  ungroup()
+
+#png("Fig.24 Approach-Data Type Patterns.png", units="in", width=10, height=4, res=200)
+ggplot(approach_data, aes(x = reorder(Approach, Proportion), y = Proportion, fill = Data)) +
+  geom_col(position = "stack") +
+  scale_fill_brewer(palette = "Set2") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Approach-Data Type Patterns",
+       subtitle = "Proportional view by Data Type",
+       x = "Approach",
+       y = "Proportion of Studies") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+```
+
+
+```{r language summary in the whole dataset}
+
+# 1. Calculate number of unique languages investigated in the whole dataset
+# First, split the languages and unlist them
+all_languages <- df$Language %>% 
+  str_split(",") %>% 
+  unlist() %>% 
+  str_trim() # trim whitespace in case there are spaces after commas
+
+# Get unique languages
+unique_languages <- unique(all_languages)
+num_unique_languages <- length(unique_languages)
+
+# 2. Calculate frequency of each language
+language_freq <- table(all_languages) %>% 
+  as.data.frame() %>% 
+  arrange(desc(Freq)) %>% 
+  rename(Language = all_languages, Count = Freq)
+
+# Print results
+cat("Number of unique languages investigated:", num_unique_languages, "\n\n")
+cat("Frequency of each language:\n")
+print(language_freq)
+```
+
+```{r language family summary in the whole dataset}
+
+# 1. Calculate number of unique language families investigated in the whole dataset
+# First, split the language family and unlist them
+all_language_family <- df$Language.family %>% 
+  str_split(",") %>% 
+  unlist() %>% 
+  str_trim() # trim whitespace in case there are spaces after commas
+
+# Get unique language families
+unique_language_family <- unique(all_language_family)
+num_unique_language_family <- length(unique_language_family)
+
+# 2. Calculate frequency of each language
+language_family_freq <- table(all_language_family) %>% 
+  as.data.frame() %>% 
+  arrange(desc(Freq)) %>% 
+  rename(Language.family = all_language_family, Count = Freq)
+
+# Print results
+cat("Number of unique language families investigated:", num_unique_language_family, "\n\n")
+cat("Frequency of each language family:\n")
+print(language_family_freq)
+```
+
+```{r Branch summary in the whole dataset}
+
+# 1. Calculate number of unique Branchs investigated in the whole dataset
+# First, split the Branchs and unlist them
+all_Branchs <- df$Branch %>% 
+  str_split(",") %>% 
+  unlist() %>% 
+  str_trim() # trim whitespace in case there are spaces after commas
+
+# Get unique Branchs
+unique_Branchs <- unique(all_Branchs)
+num_unique_Branchs <- length(unique_Branchs)
+
+# 2. Calculate frequency of each Branch
+Branch_freq <- table(all_Branchs) %>% 
+  as.data.frame() %>% 
+  arrange(desc(Freq)) %>% 
+  rename(Branch = all_Branchs, Count = Freq)
+
+# Print results
+cat("Number of unique Branchs investigated:", num_unique_Branchs, "\n\n")
+cat("Frequency of each Branch:\n")
+print(Branch_freq)
+```
+
+
+```{r System summary in the whole dataset}
+df_Systems <-df%>%
+  separate_rows(System, sep = ",\\s*") %>%
+  mutate(
+    System.New = case_when(
+      # TRANSITIVITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "transitivity|range|process type|circumstantiation|circumstance of time") ~ "TRANSITIVITY",
+      
+      # ASSESSMENT group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "negotiation|assessment") ~ "ASSESSMENT",
+      
+      # MODALITY group (case-insensitive)
+      str_detect(str_to_lower(System), 
+                "modulation|modality|modal verbs") ~ "MODALITY",
+      
+      # FINITENESS group (case-insensitive)
+      str_detect(str_to_lower(System), "finite") ~ "FINITENESS",
+      
+      # Keep original value if none of the above match
+      TRUE ~ System
+    ),
+    # Convert to factor for better plotting/analysis
+    System.New = as.factor(System.New)
+  )
+
+all_Systems <- df_Systems$System.New %>% 
+  unlist() %>% 
+  str_trim()
+
+# Get unique Systems
+unique_Systems <- unique(all_Systems)
+num_unique_Systems <- length(unique_Systems)
+
+# 2. Calculate frequency of each System
+System_freq <- table(all_Systems) %>% 
+  as.data.frame() %>% 
+  arrange(desc(Freq)) %>% 
+  rename(System = all_Systems, Count = Freq)
+
+# Print results
+cat("Number of unique Systems investigated:", num_unique_Systems, "\n\n")
+cat("Frequency of each System:\n")
+print(System_freq)
+```
+```{r Metafunction summary in the whole dataset}
+
+# 1. Calculate number of unique Metafunctions investigated in the whole dataset
+# First, split the Metafunctions and unlist them
+all_Metafunctions <- df$Metafunction %>% 
+  str_split(",") %>% 
+  unlist() %>% 
+  str_trim() # trim whitespace in case there are spaces after commas
+
+# Get unique Metafunctions
+unique_Metafunctions <- unique(all_Metafunctions)
+num_unique_Metafunctions <- length(unique_Metafunctions)
+
+# 2. Calculate frequency of each Metafunction
+Metafunction_freq <- table(all_Metafunctions) %>% 
+  as.data.frame() %>% 
+  arrange(desc(Freq)) %>% 
+  rename(Metafunction = all_Metafunctions, Count = Freq)
+
+# Print results
+cat("Number of unique Metafunctions investigated:", num_unique_Metafunctions, "\n\n")
+cat("Frequency of each Metafunction:\n")
+print(Metafunction_freq)
+```
+
+```{r Rank summary in the whole dataset}
+
+# 1. Calculate number of unique Ranks investigated in the whole dataset
+# First, split the Ranks and unlist them
+all_Ranks <- df$Rank %>% 
+  str_split(",") %>% 
+  unlist() %>% 
+  str_trim() # trim whitespace in case there are spaces after commas
+
+# Get unique Ranks
+unique_Ranks <- unique(all_Ranks)
+num_unique_Ranks <- length(unique_Ranks)
+
+# 2. Calculate frequency of each Rank
+Rank_freq <- table(all_Ranks) %>% 
+  as.data.frame() %>% 
+  arrange(desc(Freq)) %>% 
+  rename(Rank = all_Ranks, Count = Freq)
+
+# Print results
+cat("Number of unique Ranks investigated:", num_unique_Ranks, "\n\n")
+cat("Frequency of each Rank:\n")
+print(Rank_freq)
+```
+
+```{r Author summary in the whole dataset}
+
+# 1. Calculate number of unique Authors investigated in the whole dataset
+# First, split the Authors and unlist them
+all_Authors <- df$Author %>% 
+  str_split(";") %>% 
+  unlist() %>% 
+  str_trim() # trim whitespace in case there are spaces after commas
+
+# Get unique Authors
+unique_Authors <- unique(all_Authors)
+num_unique_Authors <- length(unique_Authors)
+
+# 2. Calculate frequency of each Author
+Author_freq <- table(all_Authors) %>% 
+  as.data.frame() %>% 
+  arrange(desc(Freq)) %>% 
+  rename(Author = all_Authors, Count = Freq)
+
+# Print results
+cat("Number of unique Authors investigated:", num_unique_Authors, "\n\n")
+cat("Frequency of each Author:\n")
+print(Author_freq)
+```
+
+```{r FIG11-1 overall vitality trends}
+# Plot 2: Stacked area chart for overall vitality trends
+#png("Fig.11-1 Overall vitality trends.png", units="in", width=10, height=5, res=200)
+vitality_counts %>%
+  group_by(Year, Vitality) %>%
+  summarise(Total = sum(Count), .groups = "drop") %>%
+  ggplot(aes(x = Year, y = Total, color = Vitality)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.5) +
+  geom_text(aes(label = ifelse(Total > 0, Total, "")), 
+            vjust = -0.8, size = 3, check_overlap = TRUE) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6)) +
+  labs(title = "Overall Language Vitality Research Trends (2004-2024)",
+       x = "Year",
+       y = "Number of Studies",
+       fill = "Vitality Status") +
+  theme_minimal()+
+  scale_color_brewer(palette = "Set1")
+```
+
+```{r language word cloud}
+
+library(wordcloud2)  # For interactive word clouds
+library(htmlwidgets)
+
+# Step 1: Count language frequencies
+language_cloud <- df %>%
+  separate_rows(Language, sep = ",\\s*")%>%
+  mutate(Language = trimws(Language))%>%
+  count(Language, name = "Frequency") %>%
+  arrange(desc(Frequency)) %>%
+  filter(!is.na(Language) & Language != "")  # Remove empty/missing values
+
+# Step 2: Create word cloud (interactive version - recommended)
+wordcloud2(
+  data = language_cloud,
+  size = 1.5,          # Adjust size scaling
+  minSize = 5,         # Minimum font size
+  color = "random-dark", # Color scheme
+  backgroundColor = "white",
+  shape = "circle",    # Try "cardioid", "diamond", etc.
+  rotateRatio = 0.4    # Percentage of words to rotate
+)
+
+# Step 3: Create and save interactive word cloud
+wc <- wordcloud2(
+  data = language_counts,
+  size = 1.5,
+  color = "random-dark",
+  backgroundColor = "white"
+)
+
+# Step 4: Get current script directory
+script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)  # For RStudio
+
+# Step 5: Save as HTML file
+output_file <- file.path(script_dir, "language_wordcloud.html")
+saveWidget(wc, 
+           file = output_file, 
+           selfcontained = TRUE,
+           title = "Language Word Cloud")
+
+message("Word cloud saved to: ", output_file)
+
+```
