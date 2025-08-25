@@ -1,1 +1,7 @@
-# Theory-informed-language-descriptions
+<img width="468" height="207" alt="image" src="https://github.com/user-attachments/assets/f396ad43-67e9-449c-b1cb-991c49b643c6" /># Theory-informed-language-descriptions
+
+#### Replication data and scripts for: Theory-informed language descriptions—A systematic review of systemic-functional grammatical descriptions from 2004 to 2024 (Under review).
+
+#### Research overview
+
+In debates around “theoretical” and “atheoretical” descriptions, it is often left implicit what the relationship between theory and description is, epitomised by the use of the term “descriptive theories” (Dryer 2006a). The distinction, however, is made explicit in one of the frameworks that is often left out in such debates—Systemic Functional Linguistics (SFL). Such an explicit distinction characterises SFL’s commitment to describing each language in its own terms, an approach shared with other descriptive linguistic approaches.   This paper introduces key SFL theoretical dimensions - system, rank, metafunction, stratification, and instantiation - and demonstrates how these dimensions can be applied systematically to review SFL grammatical descriptions, examining the evolution of our knowledge of grammatical descriptions informed by SFL theory. In doing so, the theory has enabled us to identify regions of meanings that have attracted SFL scholars over the past twenty years (e.g., the particular systems, ranks, or metafunctions). The theory has also made it possible for us to examine published descriptions in terms of the perspectives taken to approach grammar (via stratification) and the handling of data (via instantiation). The study thus highlights the advantages of an explicit discussion around theory and description.
