@@ -1,4 +1,4 @@
-# Theory-informed-language-descriptions
+# Theory-informed Language Descriptions
 
 #### Replication data and scripts for: (Under Review) Theory-informed language descriptions—A systematic review of systemic-functional grammatical descriptions from 2004 to 2024
 
